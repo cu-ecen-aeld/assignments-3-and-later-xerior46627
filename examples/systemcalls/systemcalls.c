@@ -1,4 +1,11 @@
+#include "stdio.h"
+#include "stdlib.h"
+#include "sys/wait.h"
 #include "systemcalls.h"
+
+#include <fcntl.h>
+#include <unistd.h>
+#include <errno.h>
 
 /**
  * @param cmd the command to execute with system()
@@ -10,12 +17,13 @@
 bool do_system(const char *cmd)
 {
 
-/*
- * TODO  add your code here
- *  Call the system() function with the command set in the cmd
- *   and return a boolean true if the system() call completed with success
- *   or false() if it returned a failure
-*/
+    int ret = system (cmd);
+    if (ret == -1) {
+        /* system function fail */
+        return false;
+    } else {
+        if ( WIFSIGNALED (ret) && ( WTERMSIG (ret) == SIGINT || WTERMSIG (ret) == SIGQUIT)) return false;
+    }
 
     return true;
 }
@@ -39,28 +47,28 @@ bool do_exec(int count, ...)
     va_list args;
     va_start(args, count);
     char * command[count+1];
-    int i;
-    for(i=0; i<count; i++)
-    {
-        command[i] = va_arg(args, char *);
-    }
+    for(int i=0; i<count; i++) command[i] = va_arg(args, char *);
     command[count] = NULL;
-    // this line is to avoid a compile warning before your implementation is complete
-    // and may be removed
-    command[count] = command[count];
-
-/*
- * TODO:
- *   Execute a system command by calling fork, execv(),
- *   and wait instead of system (see LSP page 161).
- *   Use the command[0] as the full path to the command to execute
- *   (first argument to execv), and use the remaining arguments
- *   as second argument to the execv() command.
- *
-*/
-
     va_end(args);
 
+    pid_t pid = fork ();
+    if (pid == -1) {
+        return false;
+    } else if (pid == 0) {
+        execv (command[0], command);
+        exit (-1);
+    }
+
+    int status;
+    if (waitpid (pid, &status, 0) == -1){
+        return false;
+    } else if (WIFEXITED (status)) {
+        if (status == 0) {
+            return true;
+        } else {
+            return false;
+        }
+    }
     return true;
 }
 
@@ -84,6 +92,11 @@ bool do_exec_redirect(const char *outputfile, int count, ...)
     // and may be removed
     command[count] = command[count];
 
+    int fd = open( outputfile, O_WRONLY | O_TRUNC | O_CREAT, 0777 );
+    if (fd < 0) {
+        perror("open");
+        return false;
+    }
 
 /*
  * TODO
@@ -93,7 +106,29 @@ bool do_exec_redirect(const char *outputfile, int count, ...)
  *
 */
 
-    va_end(args);
+    pid_t pid = fork ();
+    if (pid == -1) {
+        perror("fork");
+        va_end(args);
+        return false;
+    } else if (pid == 0) {
+        if (dup2(fd, 1) < 0) {
+            perror("dup2");
+            va_end(args);
+            return false;
+        }
+        close(fd);
+        execv (command[0], command);
+        exit (-1);
+    }
 
+    int status;
+    if (waitpid (pid, &status, 0) == -1) {
+        perror("waitpid");
+        va_end(args);
+        return false;
+    }
+
+    va_end(args);
     return true;
 }
